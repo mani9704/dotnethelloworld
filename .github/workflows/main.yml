@@ -1,0 +1,105 @@
+name: Terraform + .NET Build & Deploy Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  ENVIRONMENT: dev
+  LOCATION: East US
+  DOTNET_VERSION: "9.0.x"
+  WEBAPP_NAME: dotnethelloworld-dev
+
+jobs:
+  terraform-infra:
+    name: "Terraform Infrastructure Provisioning"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Initialize Terraform
+        working-directory: infra
+        run: terraform init -input=false
+
+      - name: Validate Terraform
+        working-directory: infra
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: infra
+        run: terraform plan -input=false -var="environment=${{ env.ENVIRONMENT }}" -var="location=${{ env.LOCATION }}"
+
+      - name: Terraform Apply
+        working-directory: infra
+        run: terraform apply -auto-approve -var="environment=${{ env.ENVIRONMENT }}" -var="location=${{ env.LOCATION }}"
+
+      - name: Export WebApp URL
+        id: output
+        working-directory: infra
+        run: |
+          url=$(terraform output -raw app_service_url)
+          echo "webapp_url=$url" >> $GITHUB_OUTPUT
+
+  build-and-deploy:
+    name: "Build and Deploy .NET App"
+    runs-on: ubuntu-latest
+    needs: terraform-infra
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore ./dotnethelloworld.csproj
+
+      - name: Build
+        run: dotnet build ./dotnethelloworld.csproj --configuration Release --no-restore
+
+      - name: Publish
+        run: dotnet publish ./dotnethelloworld.csproj -c Release -o ./published
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.WEBAPP_NAME }}
+          package: ./published
+
+      - name: Logout from Azure
+        if: always()
+        run: az logout
