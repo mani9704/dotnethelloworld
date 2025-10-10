@@ -100,6 +100,15 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: terraform init
+      - name: Force Unlock Terraform State (if stuck)
+        working-directory: infra
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: |
+          terraform force-unlock -force 543f15a1-ff5b-b8c8-284c-519db2c3309f || true
 
       # -----------------------------------
       # 🔟 Terraform Apply (Deploy Infrastructure)
