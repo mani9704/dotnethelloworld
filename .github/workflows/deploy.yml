@@ -65,7 +65,7 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------
-      # 🧠 Auto Import Existing RG (fixes "already exists" error)
+      # 🧠 Auto Import Existing RG
       # -----------------------------
       - name: Import Resource Group if exists
         working-directory: infra
@@ -91,10 +91,11 @@ jobs:
       # -----------------------------
       - name: Terraform Plan
         working-directory: infra
-        run: terraform plan -input=false \
-          -var="environment=$ENVIRONMENT" \
-          -var="location=$LOCATION" \
-          -var="image_name=$IMAGE_NAME"
+        run: |
+          terraform plan -input=false \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="image_name=${{ env.IMAGE_NAME }}"
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -106,10 +107,11 @@ jobs:
       # -----------------------------
       - name: Terraform Apply
         working-directory: infra
-        run: terraform apply -auto-approve \
-          -var="environment=$ENVIRONMENT" \
-          -var="location=$LOCATION" \
-          -var="image_name=$IMAGE_NAME"
+        run: |
+          terraform apply -auto-approve \
+            -var="environment=${{ env.ENVIRONMENT }}" \
+            -var="location=${{ env.LOCATION }}" \
+            -var="image_name=${{ env.IMAGE_NAME }}"
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
