@@ -47,9 +47,4 @@ module "container_app" {
   image_name   = var.image_name
 }
 
-# -----------------------------
-# 🌍 Output: Application URL
-# -----------------------------
-output "app_url" {
-  value = module.container_app.app_url
-}
+
