@@ -15,9 +15,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -----------------------------
+      # 🧩 Checkout Code
+      # -----------------------------
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # -----------------------------
+      # 🔐 Azure Login
+      # -----------------------------
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -29,49 +35,90 @@ jobs:
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
             }
 
-      - name: Register required Azure Providers
+      # -----------------------------
+      # 🏗️ Register Required Azure Providers
+      # -----------------------------
+      - name: Register Azure Providers
         run: |
           az provider register --namespace Microsoft.App --wait || true
           az provider register --namespace Microsoft.OperationalInsights --wait || true
           az provider register --namespace Microsoft.ContainerRegistry --wait || true
 
+      # -----------------------------
+      # ⚙️ Setup Terraform
+      # -----------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.8.5
 
+      # -----------------------------
+      # 💾 Terraform Init
+      # -----------------------------
       - name: Terraform Init
         working-directory: infra
-        run: terraform init -input=false
+        run: terraform init -input=false -reconfigure
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
-      - name: Force Unlock (Safe)
+      # -----------------------------
+      # 🧠 Auto Import Existing RG (fixes "already exists" error)
+      # -----------------------------
+      - name: Import Resource Group if exists
         working-directory: infra
         run: |
-          terraform force-unlock -force 12345 || true
+          RG_NAME="rg-dotnet-dev"
+          RG_EXISTS=$(az group exists --name $RG_NAME)
+          if [ "$RG_EXISTS" = "true" ]; then
+            echo "✅ Resource group $RG_NAME already exists. Importing into Terraform state..."
+            terraform import -input=false \
+              module.rg.azurerm_resource_group.rg \
+              /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME || true
+          else
+            echo "ℹ️ Resource group $RG_NAME does not exist — Terraform will create it."
+          fi
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
+      # -----------------------------
+      # 📋 Terraform Plan
+      # -----------------------------
+      - name: Terraform Plan
+        working-directory: infra
+        run: terraform plan -input=false \
+          -var="environment=$ENVIRONMENT" \
+          -var="location=$LOCATION" \
+          -var="image_name=$IMAGE_NAME"
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      # -----------------------------
+      # 🚀 Terraform Apply
+      # -----------------------------
       - name: Terraform Apply
         working-directory: infra
-        run: |
-          terraform apply -auto-approve \
-            -var="environment=$ENVIRONMENT" \
-            -var="location=$LOCATION" \
-            -var="image_name=$IMAGE_NAME"
+        run: terraform apply -auto-approve \
+          -var="environment=$ENVIRONMENT" \
+          -var="location=$LOCATION" \
+          -var="image_name=$IMAGE_NAME"
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
+      # -----------------------------
+      # 🌍 Output Application URL
+      # -----------------------------
       - name: Get App URL
         working-directory: infra
         run: terraform output -raw app_url > app_url.txt
@@ -83,5 +130,5 @@ jobs:
 
       - name: Show App URL
         run: |
-          echo "🌍 App URL:"
+          echo "🌍 Your App is Live at:"
           cat infra/app_url.txt
