@@ -1,6 +1,12 @@
 terraform {
   required_version = ">=1.5.0"
-required_providers {
+
+  # 👇 Use local backend to avoid Azure storage lock or missing resource issues
+  backend "local" {
+    path = "terraform.tfstate"
+  }
+
+  required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
       version = "~>3.100"
@@ -36,6 +42,9 @@ module "container_app" {
   image_name   = var.image_name
 }
 
+# -----------------------------
+# 🌍 Output: Application URL
+# -----------------------------
 output "app_url" {
   value = module.container_app.app_url
 }
