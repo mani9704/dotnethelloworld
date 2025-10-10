@@ -14,9 +14,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      # 🧩 1️⃣ Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 🐳 2️⃣ Login to GitHub Container Registry
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -24,25 +26,57 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ⚙️ 3️⃣ Build and push Docker image
       - name: Build and push Docker image
         run: |
+          echo "Building Docker image..."
           docker build -t $IMAGE_NAME .
           docker push $IMAGE_NAME
 
+      # 🔐 4️⃣ Azure Login (Service Principal)
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.ARM_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.ARM_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.ARM_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.ARM_TENANT_ID }}"
+            }
+
+      # 🌍 5️⃣ Setup Terraform
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.8.5
 
+      # 🪣 6️⃣ Initialize Terraform
       - name: Terraform Init
         working-directory: ./infra
         run: terraform init
 
+      # 🚀 7️⃣ Terraform Apply
       - name: Terraform Apply
+        id: apply
         working-directory: ./infra
         env:
           ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-        run: terraform apply -auto-approve -var="environment=$ENVIRONMENT" -var="location=$LOCATION" -var="image_name=$IMAGE_NAME"
+        run: |
+          terraform apply -auto-approve \
+            -var="environment=$ENVIRONMENT" \
+            -var="location=$LOCATION" \
+            -var="image_name=$IMAGE_NAME"
+          terraform output -raw app_url > app_url.txt
+
+      # 📝 8️⃣ Display the live app URL in GitHub Actions Summary
+      - name: Show Deployed App URL
+        if: success()
+        run: |
+          APP_URL=$(cat infra/app_url.txt)
+          echo "✅ Your app is live at: $APP_URL"
+          echo "### 🚀 Deployed App URL" >> $GITHUB_STEP_SUMMARY
+          echo "$APP_URL" >> $GITHUB_STEP_SUMMARY
