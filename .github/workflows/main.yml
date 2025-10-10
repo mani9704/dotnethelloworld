@@ -36,7 +36,7 @@ jobs:
             }
 
       # ------------------------------------------------------
-      # 3️⃣ Ensure required resource providers are registered
+      # 3️⃣ Ensure required Azure resource providers are registered
       # ------------------------------------------------------
       - name: Register required Azure resource providers
         run: |
@@ -60,7 +60,7 @@ jobs:
           terraform_version: 1.8.5
 
       # -----------------------------------
-      # 5️⃣ Initialize Terraform
+      # 5️⃣ Terraform Init
       # -----------------------------------
       - name: Terraform Init
         run: terraform init
@@ -72,7 +72,7 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------------
-      # 6️⃣ Terraform Apply (Deploy)
+      # 6️⃣ Terraform Apply (Deploy Infrastructure)
       # -----------------------------------
       - name: Terraform Apply
         run: |
@@ -91,13 +91,37 @@ jobs:
       # 7️⃣ Capture the App URL Output
       # -----------------------------------
       - name: Get App URL
+        id: get_app_url
         run: terraform output -raw app_url > app_url.txt
         working-directory: infra
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------------
-      # 8️⃣ Display the deployed App URL
+      # 8️⃣ Display and Export App URL
       # -----------------------------------
       - name: Show App URL
         run: |
           echo "🌍 Deployed App URL:"
           cat infra/app_url.txt
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      # -----------------------------------
+      # 9️⃣ Save URL as GitHub Action Output
+      # -----------------------------------
+      - name: Export App URL to Job Output
+        id: export_app_url
+        run: |
+          APP_URL=$(cat infra/app_url.txt)
+          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
+          echo "✅ App URL exported: $APP_URL"
+
+    outputs:
+      app_url: ${{ steps.export_app_url.outputs.app_url }}
