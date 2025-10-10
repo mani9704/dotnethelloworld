@@ -23,22 +23,25 @@ terraform {
   }
 }
 
+# -----------------------------
+# 🌐 Azure Provider
+# -----------------------------
 provider "azurerm" {
   features {}
 }
 
-# -----------------------------
-# 🏗️ Create Resource Group
-# -----------------------------
+# ============================================================
+# 🏗️ 1️⃣ Resource Group Module
+# ============================================================
 module "rg" {
   source      = "./modules/resource_group"
   environment = var.environment
   location    = var.location
 }
 
-# -----------------------------
-# 🚀 Deploy Container App
-# -----------------------------
+# ============================================================
+# 🚀 2️⃣ Container App Module
+# ============================================================
 module "container_app" {
   source       = "./modules/container_app"
   rg_name      = module.rg.name
@@ -46,5 +49,3 @@ module "container_app" {
   environment  = var.environment
   image_name   = var.image_name
 }
-
-
