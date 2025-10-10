@@ -1,19 +1,18 @@
-# Stage 1: Build the app
+# ---------- Build Stage ----------
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Copy the project file(s) and restore dependencies
-COPY **/*.csproj ./
-RUN for file in *.csproj; do dotnet restore "$file"; done
+# copy csproj and restore dependencies
+COPY *.csproj ./
+RUN dotnet restore
 
-# Copy the rest of the source code
+# copy everything else and build
 COPY . .
-
-# Build the application
 RUN dotnet publish -c Release -o /app/publish
 
-# Stage 2: Run the app
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+# ---------- Runtime Stage ----------
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app/publish .
+EXPOSE 80
 ENTRYPOINT ["dotnet", "dotnethelloworld.dll"]
