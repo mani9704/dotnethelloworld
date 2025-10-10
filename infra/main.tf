@@ -11,6 +11,16 @@ terraform {
       version = "~>3.6"
     }
   }
+
+  # -----------------------------
+  # 💾 Remote Backend Configuration
+  # -----------------------------
+  backend "azurerm" {
+    resource_group_name  = "rg-tfstate"
+    storage_account_name = "tfstatestorage9704"
+    container_name       = "tfstate"
+    key                  = "terraform.tfstate"
+  }
 }
 
 provider "azurerm" {
