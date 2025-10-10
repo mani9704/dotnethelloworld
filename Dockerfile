@@ -2,11 +2,11 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# copy csproj and restore dependencies
-COPY *.csproj ./
-RUN dotnet restore
+# Copy and restore dependencies
+COPY **/*.csproj ./
+RUN for file in *.csproj; do dotnet restore "$file"; done
 
-# copy everything else and build
+# Copy everything else and build
 COPY . .
 RUN dotnet publish -c Release -o /app/publish
 
@@ -14,5 +14,6 @@ RUN dotnet publish -c Release -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
 WORKDIR /app
 COPY --from=build /app/publish .
+ENV ASPNETCORE_URLS=http://0.0.0.0:80
 EXPOSE 80
 ENTRYPOINT ["dotnet", "dotnethelloworld.dll"]
