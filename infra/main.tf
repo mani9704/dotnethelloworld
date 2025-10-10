@@ -1,11 +1,6 @@
 terraform {
   required_version = ">=1.5.0"
 
-  # 👇 Use local backend to avoid Azure storage lock or missing resource issues
-  backend "local" {
-    path = "terraform.tfstate"
-  }
-
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
