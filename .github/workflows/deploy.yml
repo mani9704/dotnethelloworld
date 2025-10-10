@@ -75,9 +75,17 @@ jobs:
         run: |
           echo "🔍 Checking for stale Terraform locks..."
           LOCK_ID=$(terraform state pull 2>/dev/null | jq -r '.serial' || echo "")
-          if [ -n "$LOCK_ID" ] && [ "$LOCK_ID" != "null" ]; then
-            echo "⚠️  Unlocking stale Terraform lock ($LOCK_ID)..."
-            terraform force-unlock -force "$LOCK_ID" || true
+          if [ "$LOCK_ID" != "" ] && [ "$LOCK_ID" != "null" ]; then
+            echo "⚠️ Detected Terraform lock ID: $LOCK_ID"
+            echo "🧹 Checking Azure Blob lock metadata..."
+            az storage blob metadata show \
+              --container-name tfstate \
+              --name terraform.tfstate \
+              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+              --auth-mode login || true
+
+            echo "🔓 Attempting safe unlock..."
+            terraform force-unlock -force "$LOCK_ID" || echo "⚠️ Unlock skipped due to missing metadata."
           else
             echo "✅ No stale Terraform locks found."
           fi
@@ -105,6 +113,41 @@ jobs:
             echo "⏳ Lock or transient error detected, retrying in 30s (attempt $n)..."
             sleep 30
           done
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_USE_OIDC: false
+
+      # -----------------------------------
+      # 🧹 Cleanup Terraform Lock if Apply Failed
+      # -----------------------------------
+      - name: Cleanup Terraform Lock Blob on Failure
+        if: failure()
+        working-directory: infra
+        run: |
+          echo "🧹 Terraform Apply failed — checking for stale state lock..."
+          CONTAINER_NAME="tfstate"
+          STATE_FILE="terraform.tfstate"
+          STORAGE_ACCOUNT="${{ secrets.AZURE_STORAGE_ACCOUNT }}"
+
+          echo "🔍 Checking blob metadata for $STORAGE_ACCOUNT/$CONTAINER_NAME/$STATE_FILE ..."
+          az storage blob metadata show \
+            --container-name "$CONTAINER_NAME" \
+            --name "$STATE_FILE" \
+            --account-name "$STORAGE_ACCOUNT" \
+            --auth-mode login || true
+
+          echo "⚠️ Attempting to clear stale lock metadata (if any)..."
+          az storage blob metadata update \
+            --container-name "$CONTAINER_NAME" \
+            --name "$STATE_FILE" \
+            --account-name "$STORAGE_ACCOUNT" \
+            --metadata terraformlockid= \
+            --auth-mode login || true
+
+          echo "✅ Stale lock metadata cleared (if present). Safe to re-run Terraform."
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
