@@ -37,8 +37,7 @@ jobs:
           context: .
           push: true
           tags: ${{ env.IMAGE_NAME }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
 
       # -----------------------------
       # 🔐 Azure Login
@@ -72,7 +71,7 @@ jobs:
           terraform_version: 1.8.5
 
       # -----------------------------
-      # 💾 Terraform Init + Safe Unlock (SAME SHELL)
+      # 💾 Terraform Init + Unlock (SAME SHELL)
       # -----------------------------
       - name: Terraform Init + Unlock
         working-directory: infra
