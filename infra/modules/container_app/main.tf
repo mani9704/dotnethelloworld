@@ -10,9 +10,20 @@ resource "azurerm_container_app_environment" "env" {
   name                = "env-${var.environment}"
   location            = var.location
   resource_group_name = var.rg_name
-
   log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+
+  tags = {
+    environment = var.environment
+  }
+
+  lifecycle {
+    ignore_changes = [
+      log_analytics_workspace_id,
+      tags
+    ]
+  }
 }
+
 
 resource "azurerm_container_app" "app" {
   name                        = "dotnethelloworld-${var.environment}"
