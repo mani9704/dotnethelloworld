@@ -13,6 +13,9 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # ✅ allows pushing image to GHCR
 
     steps:
       # -----------------------------
@@ -20,6 +23,16 @@ jobs:
       # -----------------------------
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # -----------------------------
+      # 🐳 Build & Push Docker Image (no local Docker needed)
+      # -----------------------------
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/mani7reddy/dotnethelloworld:latest
 
       # -----------------------------
       # 🔐 Azure Login
