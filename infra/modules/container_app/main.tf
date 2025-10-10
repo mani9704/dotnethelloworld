@@ -1,7 +1,6 @@
 resource "azurerm_container_app" "app" {
   name                         = "dotnethelloworld-${var.environment}"
   resource_group_name           = var.rg_name
-  location                      = var.location
   container_app_environment_id  = azurerm_container_app_environment.env.id
   revision_mode                 = "Single"
 
