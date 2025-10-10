@@ -65,36 +65,52 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_USE_OIDC: false
 
       # -----------------------------------
-      # 6️⃣ Ensure Terraform state is unlocked
+      # 6️⃣ Ensure Terraform state is unlocked (safe)
       # -----------------------------------
       - name: Ensure Terraform state is unlocked
         working-directory: infra
         run: |
           echo "🔍 Checking for stale Terraform locks..."
-          terraform force-unlock -force $(terraform state pull | jq -r '.serial' || echo "none") || true
+          LOCK_ID=$(terraform state pull 2>/dev/null | jq -r '.serial' || echo "")
+          if [ -n "$LOCK_ID" ] && [ "$LOCK_ID" != "null" ]; then
+            echo "⚠️  Unlocking stale Terraform lock ($LOCK_ID)..."
+            terraform force-unlock -force "$LOCK_ID" || true
+          else
+            echo "✅ No stale Terraform locks found."
+          fi
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_USE_OIDC: false
 
       # -----------------------------------
-      # 7️⃣ Terraform Apply (Deploy Infrastructure)
+      # 7️⃣ Terraform Apply (with auto-retry)
       # -----------------------------------
       - name: Terraform Apply
         working-directory: infra
         run: |
-          terraform apply -auto-approve \
-            -var="environment=$ENVIRONMENT" \
-            -var="location=$LOCATION" \
-            -var="image_name=$IMAGE_NAME"
+          n=0
+          until [ $n -ge 3 ]
+          do
+            terraform apply -auto-approve \
+              -var="environment=$ENVIRONMENT" \
+              -var="location=$LOCATION" \
+              -var="image_name=$IMAGE_NAME" && break
+            n=$((n+1))
+            echo "⏳ Lock or transient error detected, retrying in 30s (attempt $n)..."
+            sleep 30
+          done
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_USE_OIDC: false
 
       # -----------------------------------
       # 8️⃣ Capture the App URL Output
@@ -108,6 +124,7 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_USE_OIDC: false
 
       # -----------------------------------
       # 9️⃣ Display and Export App URL
@@ -121,6 +138,7 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_USE_OIDC: false
 
       # -----------------------------------
       # 🔟 Export App URL to Job Output
