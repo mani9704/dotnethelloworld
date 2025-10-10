@@ -17,21 +17,6 @@ provider "azurerm" {
 }
 
 # -----------------------------
-# 🔧 Variables
-# -----------------------------
-variable "environment" {
-  default = "dev"
-}
-
-variable "location" {
-  default = "East US"
-}
-
-variable "image_name" {
-  description = "Docker image to deploy"
-}
-
-# -----------------------------
 # 🏗️ Create Resource Group
 # -----------------------------
 module "rg" {
