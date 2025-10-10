@@ -1,9 +1,8 @@
-name: Deploy .NET App to Azure Container Apps via Terraform
+name: Deploy DotNet HelloWorld to Azure Container App
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   workflow_dispatch:
 
 env:
@@ -12,75 +11,87 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.actor }}/dotnethelloworld:latest
 
 permissions:
-  id-token: write
   contents: read
   packages: write
+  id-token: write
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # -------------------------------
-      # 1️⃣ Checkout code
-      # -------------------------------
-      - name: Checkout repository
+      # -----------------------------------
+      # 1️⃣ Checkout repository
+      # -----------------------------------
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      # -------------------------------
-      # 2️⃣ Set up .NET SDK
-      # -------------------------------
+      # -----------------------------------
+      # 2️⃣ Setup .NET SDK
+      # -----------------------------------
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
-      # -------------------------------
-      # 3️⃣ Build and publish app
-      # -------------------------------
-      - name: Build and publish
+      # -----------------------------------
+      # 3️⃣ Build & publish .NET app
+      # -----------------------------------
+      - name: Build and Publish
         run: |
           dotnet restore
           dotnet publish -c Release -o app/publish
 
-      # -------------------------------
-      # 4️⃣ Log in to GitHub Container Registry (GHCR)
-      # -------------------------------
-      - name: Log in to GitHub Container Registry
+      # -----------------------------------
+      # 4️⃣ Login to GitHub Container Registry (GHCR)
+      # -----------------------------------
+      - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      # -------------------------------
-      # 5️⃣ Build and push Docker image
-      # -------------------------------
-      - name: Build and push Docker image
+      # -----------------------------------
+      # 5️⃣ Build & Push Docker Image
+      # -----------------------------------
+      - name: Build and Push Docker Image
         run: |
           docker build -t $IMAGE_NAME .
           docker push $IMAGE_NAME
 
-      # -------------------------------
-      # 6️⃣ Log in to Azure
-      # -------------------------------
+      # -----------------------------------
+      # 6️⃣ Login to Azure
+      # -----------------------------------
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: |
-           {
+            {
               "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
               "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
               "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
-           }
-      # -------------------------------
-      # 7️⃣ Set up Terraform
-      # -------------------------------
+            }
+
+      # -----------------------------------
+      # 7️⃣ Register required Azure resource providers
+      # -----------------------------------
+      - name: Register Azure Providers
+        run: |
+          az provider register --namespace Microsoft.App || true
+          az provider register --namespace Microsoft.OperationalInsights || true
+          az provider register --namespace Microsoft.ContainerRegistry || true
+          sleep 20
+          echo "✅ Providers registered"
+
+      # -----------------------------------
+      # 8️⃣ Setup Terraform CLI
+      # -----------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.8.5
 
-      # -------------------------------
-      # 8️⃣ Initialize Terraform
-      # -------------------------------
+      # -----------------------------------
+      # 9️⃣ Terraform Init
+      # -----------------------------------
       - name: Terraform Init
         working-directory: infra
         env:
@@ -90,16 +101,16 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: terraform init
 
-      # -------------------------------
-      # 9️⃣ Apply Terraform
-      # -------------------------------
+      # -----------------------------------
+      # 🔟 Terraform Apply (Deploy Infrastructure)
+      # -----------------------------------
       - name: Terraform Apply
         working-directory: infra
         env:
-          ARM_CLIENT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
-          ARM_CLIENT_SECRET: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
-          ARM_SUBSCRIPTION_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).subscriptionId }}
-          ARM_TENANT_ID: ${{ fromJson(secrets.AZURE_CREDENTIALS).tenantId }}
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ENVIRONMENT: ${{ env.ENVIRONMENT }}
           LOCATION: ${{ env.LOCATION }}
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
@@ -109,12 +120,31 @@ jobs:
             -var="location=$LOCATION" \
             -var="image_name=$IMAGE_NAME"
 
-      # -------------------------------
-      # 🔟 Output URL
-      # -------------------------------
+      # -----------------------------------
+      # 11️⃣ Get App URL
+      # -----------------------------------
       - name: Get App URL
+        id: get_app_url
         working-directory: infra
+        run: terraform output -raw app_url > app_url.txt
+
+      # -----------------------------------
+      # 12️⃣ Display App URL
+      # -----------------------------------
+      - name: Show App URL
         run: |
           echo "🌍 Deployed App URL:"
-          terraform output app_url
+          cat infra/app_url.txt
 
+      # -----------------------------------
+      # 13️⃣ Export App URL as job output
+      # -----------------------------------
+      - name: Export App URL
+        id: export_app_url
+        run: |
+          APP_URL=$(cat infra/app_url.txt)
+          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
+          echo "✅ App available at: $APP_URL"
+
+    outputs:
+      app_url: ${{ steps.export_app_url.outputs.app_url }}
