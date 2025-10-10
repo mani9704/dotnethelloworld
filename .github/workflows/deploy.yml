@@ -1,4 +1,4 @@
-name: Deploy DotNet HelloWorld to Azure Container App
+name: Build and Deploy DotNet HelloWorld to Azure Container App
 
 on:
   push:
@@ -20,6 +20,25 @@ jobs:
       # -----------------------------
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # -----------------------------
+      # 🐳 Build and Push Docker Image to GHCR
+      # -----------------------------
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE_NAME }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # -----------------------------
       # 🔐 Azure Login
@@ -53,11 +72,14 @@ jobs:
           terraform_version: 1.8.5
 
       # -----------------------------
-      # 🔓 Force Unlock if locked
+      # 💾 Terraform Init + Safe Unlock (SAME SHELL)
       # -----------------------------
-      - name: Force Unlock Terraform State (Safe)
+      - name: Terraform Init + Unlock
         working-directory: infra
         run: |
+          echo "🚀 Running terraform init..."
+          terraform init -input=false -reconfigure
+
           echo "🔍 Checking for Terraform state locks..."
           terraform force-unlock -force 87baccc5-4b9b-5f6c-d8e0-49866f46602f || echo "✅ No lock found, continuing..."
         env:
@@ -67,37 +89,27 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------
-      # 💾 Terraform Init + Import Existing Azure Resources
+      # 🔄 Import Existing Azure Resources
       # -----------------------------
-      - name: Terraform Init and Import Existing Resources
+      - name: Import Existing Azure Resources
         working-directory: infra
         run: |
-          terraform init -input=false -reconfigure
-
           RG_NAME="rg-dotnet-dev"
-          RG_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME"
           LAW_NAME="log-dev"
           ENV_NAME="env-dev"
           APP_NAME="dotnethelloworld-dev"
 
-          # Import Resource Group
-          terraform state show module.rg.azurerm_resource_group.rg >/dev/null 2>&1 || \
-          terraform import module.rg.azurerm_resource_group.rg "$RG_ID" || true
+          RG_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME"
+          LAW_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.OperationalInsights/workspaces/$LAW_NAME"
+          ENV_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/managedEnvironments/$ENV_NAME"
+          APP_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/containerApps/$APP_NAME"
 
-          # Import Log Analytics Workspace
-          terraform state show module.container_app.azurerm_log_analytics_workspace.law >/dev/null 2>&1 || \
-          terraform import module.container_app.azurerm_log_analytics_workspace.law \
-          "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.OperationalInsights/workspaces/$LAW_NAME" || true
-
-          # Import Container App Environment
-          terraform state show module.container_app.azurerm_container_app_environment.env >/dev/null 2>&1 || \
-          terraform import module.container_app.azurerm_container_app_environment.env \
-          "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/managedEnvironments/$ENV_NAME" || true
-
-          # Import Container App
-          terraform state show module.container_app.azurerm_container_app.app >/dev/null 2>&1 || \
-          terraform import module.container_app.azurerm_container_app.app \
-          "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/containerApps/$APP_NAME" || true
+          echo "🔍 Importing Azure resources if not in state..."
+          terraform state show module.rg.azurerm_resource_group.rg >/dev/null 2>&1 || terraform import module.rg.azurerm_resource_group.rg "$RG_ID" || true
+          terraform state show module.container_app.azurerm_log_analytics_workspace.law >/dev/null 2>&1 || terraform import module.container_app.azurerm_log_analytics_workspace.law "$LAW_ID" || true
+          terraform state show module.container_app.azurerm_container_app_environment.env >/dev/null 2>&1 || terraform import module.container_app.azurerm_container_app_environment.env "$ENV_ID" || true
+          terraform state show module.container_app.azurerm_container_app.app >/dev/null 2>&1 || terraform import module.container_app.azurerm_container_app.app "$APP_ID" || true
+          echo "✅ Import check complete."
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
