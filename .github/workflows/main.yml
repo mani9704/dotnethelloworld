@@ -40,7 +40,7 @@ jobs:
       # ------------------------------------------------------
       - name: Register required Azure resource providers
         run: |
-          echo "🔍 Registering providers..."
+          echo "🔍 Registering Azure providers..."
           az provider register --namespace Microsoft.App --wait || true
           az provider register --namespace Microsoft.OperationalInsights --wait || true
           az provider register --namespace Microsoft.ContainerRegistry --wait || true
@@ -67,11 +67,13 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------------
-      # 6️⃣ Force Unlock (in case previous job crashed)
+      # 6️⃣ Ensure Terraform state is unlocked
       # -----------------------------------
-      - name: Force Unlock Terraform State (if stuck)
+      - name: Ensure Terraform state is unlocked
         working-directory: infra
-        run: terraform force-unlock -force 543f15a1-ff5b-b8c8-284c-519db2c3309f || true
+        run: |
+          echo "🔍 Checking for stale Terraform locks..."
+          terraform force-unlock -force $(terraform state pull | jq -r '.serial' || echo "none") || true
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -121,7 +123,7 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------------
-      # 🔟 Export App URL as GitHub Output
+      # 🔟 Export App URL to Job Output
       # -----------------------------------
       - name: Export App URL to Job Output
         id: export_app_url
