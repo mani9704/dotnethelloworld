@@ -53,6 +53,20 @@ jobs:
           terraform_version: 1.8.5
 
       # -----------------------------
+      # 🔓 Force Unlock if locked
+      # -----------------------------
+      - name: Force Unlock Terraform State (Safe)
+        working-directory: infra
+        run: |
+          echo "🔍 Checking for Terraform state locks..."
+          terraform force-unlock -force 87baccc5-4b9b-5f6c-d8e0-49866f46602f || echo "✅ No lock found, continuing..."
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      # -----------------------------
       # 💾 Terraform Init + Import Existing Azure Resources
       # -----------------------------
       - name: Terraform Init and Import Existing Resources
@@ -60,71 +74,43 @@ jobs:
         run: |
           terraform init -input=false -reconfigure
 
-          # ====== Resource Group ======
           RG_NAME="rg-dotnet-dev"
           RG_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME"
-          RG_IN_STATE=$(terraform state list | grep "module.rg.azurerm_resource_group.rg" || true)
-          if [ -z "$RG_IN_STATE" ]; then
-            echo "✅ Importing existing Resource Group..."
-            terraform import module.rg.azurerm_resource_group.rg "$RG_ID" || true
-          else
-            echo "ℹ️ Resource Group already managed by Terraform — skipping import."
-          fi
-
-          # ====== Log Analytics Workspace ======
           LAW_NAME="log-dev"
-          LAW_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.OperationalInsights/workspaces/$LAW_NAME"
-          LAW_IN_STATE=$(terraform state list | grep "module.container_app.azurerm_log_analytics_workspace.law" || true)
-          if [ -z "$LAW_IN_STATE" ]; then
-            echo "✅ Importing existing Log Analytics Workspace..."
-            terraform import module.container_app.azurerm_log_analytics_workspace.law "$LAW_ID" || true
-          else
-            echo "ℹ️ Log Analytics Workspace already managed by Terraform — skipping import."
-          fi
-
-          # ====== Container App Environment ======
           ENV_NAME="env-dev"
-          ENV_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/managedEnvironments/$ENV_NAME"
-          ENV_IN_STATE=$(terraform state list | grep "module.container_app.azurerm_container_app_environment.env" || true)
-          if [ -z "$ENV_IN_STATE" ]; then
-            echo "✅ Importing existing Container App Environment..."
-            terraform import module.container_app.azurerm_container_app_environment.env "$ENV_ID" || true
-          else
-            echo "ℹ️ Container App Environment already managed by Terraform — skipping import."
-          fi
-
-          # ====== Container App ======
           APP_NAME="dotnethelloworld-dev"
-          APP_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/containerApps/$APP_NAME"
-          APP_IN_STATE=$(terraform state list | grep "module.container_app.azurerm_container_app.app" || true)
-          if [ -z "$APP_IN_STATE" ]; then
-            echo "✅ Importing existing Container App..."
-            terraform import module.container_app.azurerm_container_app.app "$APP_ID" || true
-          else
-            echo "ℹ️ Container App already managed by Terraform — skipping import."
-          fi
+
+          # Import Resource Group
+          terraform state show module.rg.azurerm_resource_group.rg >/dev/null 2>&1 || \
+          terraform import module.rg.azurerm_resource_group.rg "$RG_ID" || true
+
+          # Import Log Analytics Workspace
+          terraform state show module.container_app.azurerm_log_analytics_workspace.law >/dev/null 2>&1 || \
+          terraform import module.container_app.azurerm_log_analytics_workspace.law \
+          "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.OperationalInsights/workspaces/$LAW_NAME" || true
+
+          # Import Container App Environment
+          terraform state show module.container_app.azurerm_container_app_environment.env >/dev/null 2>&1 || \
+          terraform import module.container_app.azurerm_container_app_environment.env \
+          "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/managedEnvironments/$ENV_NAME" || true
+
+          # Import Container App
+          terraform state show module.container_app.azurerm_container_app.app >/dev/null 2>&1 || \
+          terraform import module.container_app.azurerm_container_app.app \
+          "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/containerApps/$APP_NAME" || true
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      
-      - name: Force Unlock Terraform State (if locked)
-        working-directory: infra
-        run: |
-          terraform force-unlock -force 87baccc5-4b9b-5f6c-d8e0-49866f46602f || true
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
       # -----------------------------
       # 📋 Terraform Plan
       # -----------------------------
       - name: Terraform Plan
         working-directory: infra
         run: |
-          terraform plan -input=false \
+          terraform plan -lock=false -input=false \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="location=${{ env.LOCATION }}" \
             -var="image_name=${{ env.IMAGE_NAME }}"
@@ -140,7 +126,7 @@ jobs:
       - name: Terraform Apply
         working-directory: infra
         run: |
-          terraform apply -auto-approve \
+          terraform apply -lock=false -auto-approve \
             -var="environment=${{ env.ENVIRONMENT }}" \
             -var="location=${{ env.LOCATION }}" \
             -var="image_name=${{ env.IMAGE_NAME }}"
