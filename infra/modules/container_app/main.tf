@@ -1,8 +1,24 @@
+resource "azurerm_log_analytics_workspace" "law" {
+  name                = "log-${var.environment}"
+  location            = var.location
+  resource_group_name = var.rg_name
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+resource "azurerm_container_app_environment" "env" {
+  name                = "env-${var.environment}"
+  location            = var.location
+  resource_group_name = var.rg_name
+
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+}
+
 resource "azurerm_container_app" "app" {
-  name                         = "dotnethelloworld-${var.environment}"
-  resource_group_name           = var.rg_name
-  container_app_environment_id  = azurerm_container_app_environment.env.id
-  revision_mode                 = "Single"
+  name                        = "dotnethelloworld-${var.environment}"
+  resource_group_name          = var.rg_name
+  container_app_environment_id = azurerm_container_app_environment.env.id
+  revision_mode                = "Single"
 
   template {
     container {
@@ -21,6 +37,7 @@ resource "azurerm_container_app" "app" {
   ingress {
     external_enabled = true
     target_port      = 80
+    transport        = "auto"
 
     traffic_weight {
       latest_revision = true
@@ -31,10 +48,4 @@ resource "azurerm_container_app" "app" {
   tags = {
     environment = var.environment
   }
-}
-
-resource "azurerm_container_app_environment" "env" {
-  name                = "env-${var.environment}"
-  location            = var.location
-  resource_group_name = var.rg_name
 }
