@@ -8,57 +8,22 @@ on:
 env:
   ENVIRONMENT: dev
   LOCATION: East US
-  IMAGE_NAME: ghcr.io/${{ github.actor }}/dotnethelloworld:latest
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
+  IMAGE_NAME: ghcr.io/mani7reddy/dotnethelloworld:latest
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # -----------------------------------
-      # 1️⃣ Checkout repository
-      # -----------------------------------
+      # ---------------------------
+      # 1️⃣ Checkout the repository
+      # ---------------------------
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # -----------------------------------
-      # 2️⃣ Setup .NET SDK
-      # -----------------------------------
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      # -----------------------------------
-      # 3️⃣ Build & publish .NET app
-      # -----------------------------------
-      - name: Build and Publish
-        run: |
-          dotnet restore
-          dotnet publish -c Release -o app/publish
-
-      # -----------------------------------
-      # 4️⃣ Login to GitHub Container Registry (GHCR)
-      # -----------------------------------
-      - name: Log in to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      # -----------------------------------
-      # 5️⃣ Build & Push Docker Image
-      # -----------------------------------
-      - name: Build and Push Docker Image
-        run: |
-          docker build -t $IMAGE_NAME .
-          docker push $IMAGE_NAME
-
-      # -----------------------------------
-      # 6️⃣ Login to Azure
-      # -----------------------------------
+      # -------------------------------------
+      # 2️⃣ Login to Azure using Service Principal
+      # -------------------------------------
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -70,19 +35,19 @@ jobs:
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
             }
 
-      # -----------------------------------
-      # 7️⃣ Register required Azure resource providers
-      # -----------------------------------
-      - name: Register Azure Providers
+      # ------------------------------------------------------
+      # 3️⃣ Ensure required Azure resource providers are registered
+      # ------------------------------------------------------
+      - name: Register required Azure resource providers
         run: |
-          az provider register --namespace Microsoft.App || true
-          az provider register --namespace Microsoft.OperationalInsights || true
-          az provider register --namespace Microsoft.ContainerRegistry || true
-          sleep 20
-          echo "✅ Providers registered"
+          echo "🔍 Registering providers..."
+          az provider register --namespace Microsoft.App --wait || true
+          az provider register --namespace Microsoft.OperationalInsights --wait || true
+          az provider register --namespace Microsoft.ContainerRegistry --wait || true
+          echo "✅ Provider registration complete."
 
       # -----------------------------------
-      # 8️⃣ Setup Terraform CLI
+      # 4️⃣ Setup Terraform CLI
       # -----------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -90,70 +55,80 @@ jobs:
           terraform_version: 1.8.5
 
       # -----------------------------------
-      # 9️⃣ Terraform Init
+      # 5️⃣ Terraform Init
       # -----------------------------------
       - name: Terraform Init
         working-directory: infra
+        run: terraform init -input=false
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: terraform init
-      - name: Force Unlock Terraform State (if stuck)
-        working-directory: infra
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: |
-          terraform force-unlock -force 543f15a1-ff5b-b8c8-284c-519db2c3309f || true
 
       # -----------------------------------
-      # 🔟 Terraform Apply (Deploy Infrastructure)
+      # 6️⃣ Force Unlock (in case previous job crashed)
+      # -----------------------------------
+      - name: Force Unlock Terraform State (if stuck)
+        working-directory: infra
+        run: terraform force-unlock -force 543f15a1-ff5b-b8c8-284c-519db2c3309f || true
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+
+      # -----------------------------------
+      # 7️⃣ Terraform Apply (Deploy Infrastructure)
       # -----------------------------------
       - name: Terraform Apply
         working-directory: infra
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ENVIRONMENT: ${{ env.ENVIRONMENT }}
-          LOCATION: ${{ env.LOCATION }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           terraform apply -auto-approve \
             -var="environment=$ENVIRONMENT" \
             -var="location=$LOCATION" \
             -var="image_name=$IMAGE_NAME"
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------------
-      # 11️⃣ Get App URL
+      # 8️⃣ Capture the App URL Output
       # -----------------------------------
       - name: Get App URL
         id: get_app_url
         working-directory: infra
         run: terraform output -raw app_url > app_url.txt
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------------
-      # 12️⃣ Display App URL
+      # 9️⃣ Display and Export App URL
       # -----------------------------------
       - name: Show App URL
         run: |
           echo "🌍 Deployed App URL:"
           cat infra/app_url.txt
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
 
       # -----------------------------------
-      # 13️⃣ Export App URL as job output
+      # 🔟 Export App URL as GitHub Output
       # -----------------------------------
-      - name: Export App URL
+      - name: Export App URL to Job Output
         id: export_app_url
         run: |
           APP_URL=$(cat infra/app_url.txt)
           echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
-          echo "✅ App available at: $APP_URL"
+          echo "✅ App URL exported: $APP_URL"
 
     outputs:
       app_url: ${{ steps.export_app_url.outputs.app_url }}
