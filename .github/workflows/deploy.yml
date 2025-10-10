@@ -15,15 +15,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ---------------------------
-      # 1️⃣ Checkout the repository
-      # ---------------------------
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # -------------------------------------
-      # 2️⃣ Login to Azure using Service Principal
-      # -------------------------------------
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -35,28 +29,17 @@ jobs:
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
             }
 
-      # ------------------------------------------------------
-      # 3️⃣ Ensure required Azure resource providers are registered
-      # ------------------------------------------------------
-      - name: Register required Azure resource providers
+      - name: Register required Azure Providers
         run: |
-          echo "🔍 Registering Azure providers..."
           az provider register --namespace Microsoft.App --wait || true
           az provider register --namespace Microsoft.OperationalInsights --wait || true
           az provider register --namespace Microsoft.ContainerRegistry --wait || true
-          echo "✅ Provider registration complete."
 
-      # -----------------------------------
-      # 4️⃣ Setup Terraform CLI
-      # -----------------------------------
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.8.5
 
-      # -----------------------------------
-      # 5️⃣ Terraform Init
-      # -----------------------------------
       - name: Terraform Init
         working-directory: infra
         run: terraform init -input=false
@@ -65,111 +48,31 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_USE_OIDC: false
 
-      # -----------------------------------
-      # 6️⃣ Ensure Terraform state is unlocked (safe version)
-      # -----------------------------------
-      - name: Ensure Terraform state is unlocked
+      - name: Force Unlock (Safe)
         working-directory: infra
         run: |
-          echo "🔍 Checking for stale Terraform locks..."
-          LOCK_ID=$(terraform state pull 2>/dev/null | jq -r '.serial' || echo "")
-          if [ "$LOCK_ID" != "" ] && [ "$LOCK_ID" != "null" ]; then
-            echo "⚠️ Detected Terraform lock ID: $LOCK_ID"
-
-            if [ -z "${{ secrets.AZURE_STORAGE_ACCOUNT }}" ]; then
-              echo "⚠️ Skipping blob metadata check — AZURE_STORAGE_ACCOUNT secret not set."
-            else
-              echo "🧹 Checking Azure Blob lock metadata for ${{ secrets.AZURE_STORAGE_ACCOUNT }}..."
-              az storage blob metadata show \
-                --container-name tfstate \
-                --name terraform.tfstate \
-                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-                --auth-mode login || true
-            fi
-
-            echo "🔓 Attempting safe unlock..."
-            terraform force-unlock -force "$LOCK_ID" || echo "⚠️ Unlock skipped due to missing metadata."
-          else
-            echo "✅ No stale Terraform locks found."
-          fi
+          terraform force-unlock -force 12345 || true
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_USE_OIDC: false
 
-      # -----------------------------------
-      # 7️⃣ Terraform Apply (with retry logic)
-      # -----------------------------------
       - name: Terraform Apply
         working-directory: infra
         run: |
-          n=0
-          until [ $n -ge 3 ]
-          do
-            terraform apply -auto-approve \
-              -var="environment=$ENVIRONMENT" \
-              -var="location=$LOCATION" \
-              -var="image_name=$IMAGE_NAME" && break
-            n=$((n+1))
-            echo "⏳ Lock or transient error detected, retrying in 30s (attempt $n)..."
-            sleep 30
-          done
+          terraform apply -auto-approve \
+            -var="environment=$ENVIRONMENT" \
+            -var="location=$LOCATION" \
+            -var="image_name=$IMAGE_NAME"
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_USE_OIDC: false
 
-      # -----------------------------------
-      # 8️⃣ Cleanup Terraform Lock if Apply Failed
-      # -----------------------------------
-      - name: Cleanup Terraform Lock Blob on Failure
-        if: failure()
-        working-directory: infra
-        run: |
-          echo "🧹 Terraform Apply failed — checking for stale state lock..."
-          CONTAINER_NAME="tfstate"
-          STATE_FILE="terraform.tfstate"
-          STORAGE_ACCOUNT="${{ secrets.AZURE_STORAGE_ACCOUNT }}"
-
-          if [ -z "$STORAGE_ACCOUNT" ]; then
-            echo "⚠️ AZURE_STORAGE_ACCOUNT not configured — skipping cleanup."
-            exit 0
-          fi
-
-          echo "🔍 Checking blob metadata for $STORAGE_ACCOUNT/$CONTAINER_NAME/$STATE_FILE ..."
-          az storage blob metadata show \
-            --container-name "$CONTAINER_NAME" \
-            --name "$STATE_FILE" \
-            --account-name "$STORAGE_ACCOUNT" \
-            --auth-mode login || true
-
-          echo "⚠️ Attempting to clear stale lock metadata (if any)..."
-          az storage blob metadata update \
-            --container-name "$CONTAINER_NAME" \
-            --name "$STATE_FILE" \
-            --account-name "$STORAGE_ACCOUNT" \
-            --metadata terraformlockid= \
-            --auth-mode login || true
-
-          echo "✅ Stale lock metadata cleared (if present). Safe to re-run Terraform."
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_USE_OIDC: false
-
-      # -----------------------------------
-      # 9️⃣ Capture the App URL Output
-      # -----------------------------------
       - name: Get App URL
-        id: get_app_url
         working-directory: infra
         run: terraform output -raw app_url > app_url.txt
         env:
@@ -177,28 +80,8 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_USE_OIDC: false
 
-      # -----------------------------------
-      # 🔟 Display & Export App URL
-      # -----------------------------------
       - name: Show App URL
         run: |
-          echo "🌍 Deployed App URL:"
+          echo "🌍 App URL:"
           cat infra/app_url.txt
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_USE_OIDC: false
-
-      - name: Export App URL to Job Output
-        id: export_app_url
-        run: |
-          APP_URL=$(cat infra/app_url.txt)
-          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
-          echo "✅ App URL exported: $APP_URL"
-
-    outputs:
-      app_url: ${{ steps.export_app_url.outputs.app_url }}
