@@ -113,6 +113,11 @@ jobs:
         working-directory: infra
         run: |
           terraform force-unlock -force 87baccc5-4b9b-5f6c-d8e0-49866f46602f || true
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       # -----------------------------
       # 📋 Terraform Plan
       # -----------------------------
