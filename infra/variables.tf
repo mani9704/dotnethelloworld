@@ -1,14 +1,14 @@
 variable "environment" {
+  description = "Deployment environment (e.g., dev, test, prod)"
   type        = string
-  description = "Deployment environment"
 }
 
 variable "location" {
+  description = "Azure region where resources will be deployed"
   type        = string
-  description = "Azure region"
 }
 
 variable "image_name" {
+  description = "Container image to deploy"
   type        = string
-  description = "Docker image name"
 }
