@@ -92,6 +92,17 @@ jobs:
           else
             echo "ℹ️ Container App Environment already managed by Terraform — skipping import."
           fi
+
+          # ====== Container App ======
+          APP_NAME="dotnethelloworld-dev"
+          APP_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/containerApps/$APP_NAME"
+          APP_IN_STATE=$(terraform state list | grep "module.container_app.azurerm_container_app.app" || true)
+          if [ -z "$APP_IN_STATE" ]; then
+            echo "✅ Importing existing Container App..."
+            terraform import module.container_app.azurerm_container_app.app "$APP_ID" || true
+          else
+            echo "ℹ️ Container App already managed by Terraform — skipping import."
+          fi
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
