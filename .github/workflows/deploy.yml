@@ -53,67 +53,44 @@ jobs:
           terraform_version: 1.8.5
 
       # -----------------------------
-      # 💾 Terraform Init
+      # 💾 Terraform Init + Import Existing Azure Resources
       # -----------------------------
-      - name: Terraform Init
-        working-directory: infra
-        run: terraform init -input=false -reconfigure
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-
-      # -----------------------------
-      # 🧠 Import Existing Azure Resources (RG + LAW + Environment)
-      # -----------------------------
-      - name: Import Existing Azure Resources (RG + LAW + Environment)
+      - name: Terraform Init and Import Existing Resources
         working-directory: infra
         run: |
-          # ====== Resource Group Import ======
-          RG_NAME="rg-dotnet-dev"
-          RG_EXISTS=$(az group exists --name $RG_NAME)
-          RG_IN_STATE=$(terraform state list | grep "module.rg.azurerm_resource_group.rg" || true)
+          terraform init -input=false -reconfigure
 
-          if [ "$RG_EXISTS" = "true" ] && [ -z "$RG_IN_STATE" ]; then
-            echo "✅ RG exists in Azure but not in state — importing..."
-            terraform import -input=false \
-              module.rg.azurerm_resource_group.rg \
-              /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME || true
-          elif [ -n "$RG_IN_STATE" ]; then
-            echo "ℹ️ RG already managed by Terraform — skipping import."
+          # ====== Resource Group ======
+          RG_NAME="rg-dotnet-dev"
+          RG_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME"
+          RG_IN_STATE=$(terraform state list | grep "module.rg.azurerm_resource_group.rg" || true)
+          if [ -z "$RG_IN_STATE" ]; then
+            echo "✅ Importing existing Resource Group..."
+            terraform import module.rg.azurerm_resource_group.rg "$RG_ID" || true
           else
-            echo "ℹ️ RG does not exist — Terraform will create it."
+            echo "ℹ️ Resource Group already managed by Terraform — skipping import."
           fi
 
-          # ====== Log Analytics Workspace Import ======
+          # ====== Log Analytics Workspace ======
           LAW_NAME="log-dev"
           LAW_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.OperationalInsights/workspaces/$LAW_NAME"
-          LAW_EXISTS=$(az monitor log-analytics workspace show --resource-group $RG_NAME --workspace-name $LAW_NAME --query id -o tsv 2>/dev/null || true)
           LAW_IN_STATE=$(terraform state list | grep "module.container_app.azurerm_log_analytics_workspace.law" || true)
-
-          if [ -n "$LAW_EXISTS" ] && [ -z "$LAW_IN_STATE" ]; then
-            echo "✅ Log Analytics Workspace exists — importing..."
-            terraform import -input=false module.container_app.azurerm_log_analytics_workspace.law "$LAW_ID" || true
-          elif [ -n "$LAW_IN_STATE" ]; then
-            echo "ℹ️ Log Analytics Workspace already managed — skipping import."
+          if [ -z "$LAW_IN_STATE" ]; then
+            echo "✅ Importing existing Log Analytics Workspace..."
+            terraform import module.container_app.azurerm_log_analytics_workspace.law "$LAW_ID" || true
           else
-            echo "ℹ️ Log Analytics Workspace not found — Terraform will create it."
+            echo "ℹ️ Log Analytics Workspace already managed by Terraform — skipping import."
           fi
 
-          # ====== Container App Environment Import ======
+          # ====== Container App Environment ======
           ENV_NAME="env-dev"
           ENV_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/managedEnvironments/$ENV_NAME"
-          ENV_EXISTS=$(az resource show --ids "$ENV_ID" --query id -o tsv 2>/dev/null || true)
           ENV_IN_STATE=$(terraform state list | grep "module.container_app.azurerm_container_app_environment.env" || true)
-
-          if [ -n "$ENV_EXISTS" ] && [ -z "$ENV_IN_STATE" ]; then
-            echo "✅ Container App Environment exists — importing..."
-            terraform import -input=false module.container_app.azurerm_container_app_environment.env "$ENV_ID" || true
-          elif [ -n "$ENV_IN_STATE" ]; then
-            echo "ℹ️ Container App Environment already managed — skipping import."
+          if [ -z "$ENV_IN_STATE" ]; then
+            echo "✅ Importing existing Container App Environment..."
+            terraform import module.container_app.azurerm_container_app_environment.env "$ENV_ID" || true
           else
-            echo "ℹ️ Container App Environment not found — Terraform will create it."
+            echo "ℹ️ Container App Environment already managed by Terraform — skipping import."
           fi
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
