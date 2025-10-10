@@ -1,14 +1,17 @@
 variable "environment" {
-  description = "Deployment environment (e.g., dev, test, prod)"
+  description = "Deployment environment (e.g., dev, stage, prod)"
   type        = string
+  default     = "dev"
 }
 
 variable "location" {
-  description = "Azure region where resources will be deployed"
+  description = "Azure region for deployment"
   type        = string
+  default     = "East US"
 }
 
 variable "image_name" {
-  description = "Container image to deploy"
+  description = "Container image name for deployment"
   type        = string
+  default     = "ghcr.io/mani7reddy/dotnethelloworld:latest"
 }
