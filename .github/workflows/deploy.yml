@@ -68,7 +68,7 @@ jobs:
           ARM_USE_OIDC: false
 
       # -----------------------------------
-      # 6️⃣ Ensure Terraform state is unlocked (safe)
+      # 6️⃣ Ensure Terraform state is unlocked (safe version)
       # -----------------------------------
       - name: Ensure Terraform state is unlocked
         working-directory: infra
@@ -77,12 +77,17 @@ jobs:
           LOCK_ID=$(terraform state pull 2>/dev/null | jq -r '.serial' || echo "")
           if [ "$LOCK_ID" != "" ] && [ "$LOCK_ID" != "null" ]; then
             echo "⚠️ Detected Terraform lock ID: $LOCK_ID"
-            echo "🧹 Checking Azure Blob lock metadata..."
-            az storage blob metadata show \
-              --container-name tfstate \
-              --name terraform.tfstate \
-              --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
-              --auth-mode login || true
+
+            if [ -z "${{ secrets.AZURE_STORAGE_ACCOUNT }}" ]; then
+              echo "⚠️ Skipping blob metadata check — AZURE_STORAGE_ACCOUNT secret not set."
+            else
+              echo "🧹 Checking Azure Blob lock metadata for ${{ secrets.AZURE_STORAGE_ACCOUNT }}..."
+              az storage blob metadata show \
+                --container-name tfstate \
+                --name terraform.tfstate \
+                --account-name ${{ secrets.AZURE_STORAGE_ACCOUNT }} \
+                --auth-mode login || true
+            fi
 
             echo "🔓 Attempting safe unlock..."
             terraform force-unlock -force "$LOCK_ID" || echo "⚠️ Unlock skipped due to missing metadata."
@@ -97,7 +102,7 @@ jobs:
           ARM_USE_OIDC: false
 
       # -----------------------------------
-      # 7️⃣ Terraform Apply (with auto-retry)
+      # 7️⃣ Terraform Apply (with retry logic)
       # -----------------------------------
       - name: Terraform Apply
         working-directory: infra
@@ -121,7 +126,7 @@ jobs:
           ARM_USE_OIDC: false
 
       # -----------------------------------
-      # 🧹 Cleanup Terraform Lock if Apply Failed
+      # 8️⃣ Cleanup Terraform Lock if Apply Failed
       # -----------------------------------
       - name: Cleanup Terraform Lock Blob on Failure
         if: failure()
@@ -131,6 +136,11 @@ jobs:
           CONTAINER_NAME="tfstate"
           STATE_FILE="terraform.tfstate"
           STORAGE_ACCOUNT="${{ secrets.AZURE_STORAGE_ACCOUNT }}"
+
+          if [ -z "$STORAGE_ACCOUNT" ]; then
+            echo "⚠️ AZURE_STORAGE_ACCOUNT not configured — skipping cleanup."
+            exit 0
+          fi
 
           echo "🔍 Checking blob metadata for $STORAGE_ACCOUNT/$CONTAINER_NAME/$STATE_FILE ..."
           az storage blob metadata show \
@@ -156,7 +166,7 @@ jobs:
           ARM_USE_OIDC: false
 
       # -----------------------------------
-      # 8️⃣ Capture the App URL Output
+      # 9️⃣ Capture the App URL Output
       # -----------------------------------
       - name: Get App URL
         id: get_app_url
@@ -170,7 +180,7 @@ jobs:
           ARM_USE_OIDC: false
 
       # -----------------------------------
-      # 9️⃣ Display and Export App URL
+      # 🔟 Display & Export App URL
       # -----------------------------------
       - name: Show App URL
         run: |
@@ -183,9 +193,6 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_USE_OIDC: false
 
-      # -----------------------------------
-      # 🔟 Export App URL to Job Output
-      # -----------------------------------
       - name: Export App URL to Job Output
         id: export_app_url
         run: |
