@@ -28,12 +28,12 @@ jobs:
     - name: Restore → Build → Test
       run: |
         dotnet restore src
-        dotnet build src -c Release --no-restore
-        dotnet test src --no-build -c Release
+        dotnet build HelloApi -c Release --no-restore
+        dotnet test HelloApi --no-build -c Release
 
     - name: Publish artifact
       run: |
-        dotnet publish src -c Release -o output
+        dotnet publish HelloApi -c Release -o output
         cd output
         zip -r ../app.zip .
       shell: bash
