@@ -9,7 +9,7 @@ env:
   LOCATION: eastus
   ENVIRONMENT: dev
   PROJECT_NAME: dotnet9api
-  PLAN_SKU: S1
+  PLAN_SKU: P1v3
   DOTNET_VERSION: 9.0.x
   DOTNET_RUNTIME: 9.0
 
