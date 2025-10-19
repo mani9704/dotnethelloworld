@@ -3,7 +3,7 @@ variable "tenant_id"       { type = string }
 
 variable "location" {
   type    = string
-  default = "eastus"
+  default = "centralus"
 }
 
 variable "project_name" {
