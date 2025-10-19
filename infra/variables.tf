@@ -22,7 +22,7 @@ variable "environment" {
 variable "plan_sku" {
   description = "e.g., B1, P0v3, P1v3"
   type        = string
-  default     = "F1"
+  default     = "S1"
 }
 
 # .NET runtime version for App Service
