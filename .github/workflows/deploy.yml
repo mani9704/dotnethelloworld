@@ -1,166 +1,109 @@
-name: Build and Deploy DotNet HelloWorld to Azure Container App
+name: Build & Deploy to Azure App Service
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 env:
+  LOCATION: eastus
   ENVIRONMENT: dev
-  LOCATION: East US
-  IMAGE_NAME: ghcr.io/mani7reddy/dotnethelloworld:latest
+  PROJECT_NAME: dotnet9api
+  PLAN_SKU: B1
+  DOTNET_VERSION: 9.0.x
+  DOTNET_RUNTIME: 9.0
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore → Build → Test
+      run: |
+        dotnet restore src
+        dotnet build src -c Release --no-restore
+        dotnet test src --no-build -c Release
+
+    - name: Publish artifact
+      run: |
+        dotnet publish src -c Release -o output
+        cd output
+        zip -r ../app.zip .
+      shell: bash
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: app
+        path: app.zip
+
+  infra:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.7.5
+
+    - name: Terraform Init → Plan → Apply
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      run: |
+        cd infra
+        terraform init -input=false
+        terraform plan \
+          -var "subscription_id=${ARM_SUBSCRIPTION_ID}" \
+          -var "tenant_id=${ARM_TENANT_ID}" \
+          -var "location=${{ env.LOCATION }}" \
+          -var "project_name=${{ env.PROJECT_NAME }}" \
+          -var "environment=${{ env.ENVIRONMENT }}" \
+          -var "plan_sku=${{ env.PLAN_SKU }}" \
+          -var "dotnet_version=${{ env.DOTNET_RUNTIME }}" \
+          -out tfplan
+
+        terraform apply -input=false -auto-approve tfplan
+
+        echo "WEBAPP_NAME=$(terraform output -raw webapp_name)" >> $GITHUB_ENV
+        echo "WEBAPP_URL=$(terraform output -raw webapp_url)" >> $GITHUB_ENV
+
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    needs: [ build, infra ]
     steps:
-      # -----------------------------
-      # 🧩 Checkout Code
-      # -----------------------------
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: app
+        path: app
 
-      # -----------------------------
-      # 🐳 Build and Push Docker Image
-      # -----------------------------
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.ARM_CLIENT_ID }}
+        tenant-id: ${{ secrets.ARM_TENANT_ID }}
+        subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        client-secret: ${{ secrets.ARM_CLIENT_SECRET }}
 
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ env.IMAGE_NAME }}
-          no-cache: true
-          platforms: linux/amd64
+    - name: Deploy to Azure App Service
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: ${{ env.WEBAPP_NAME }}
+        package: app/app.zip
 
-      # -----------------------------
-      # 🔐 Azure Login
-      # -----------------------------
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          creds: |
-            {
-              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
-              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
-            }
-
-      # -----------------------------
-      # 🏗️ Register Required Azure Providers
-      # -----------------------------
-      - name: Register Azure Providers
-        run: |
-          for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.ContainerRegistry; do
-            echo "Registering provider: $ns"
-            az provider register --namespace $ns --wait || true
-          done
-
-      # -----------------------------
-      # ⚙️ Setup Terraform
-      # -----------------------------
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.8.5
-
-      # -----------------------------
-      # 💾 Terraform Init + Safe Unlock
-      # -----------------------------
-      - name: Terraform Init + Safe Unlock
-        working-directory: infra
-        run: |
-          echo "🚀 Initializing Terraform..."
-          terraform init -input=false -reconfigure
-
-          echo "🔍 Checking for existing Terraform locks..."
-          terraform force-unlock -force 87baccc5-4b9b-5f6c-d8e0-49866f46602f 2>&1 || echo "✅ No active lock found — continuing."
-        continue-on-error: true
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-
-      # -----------------------------
-      # 🔄 Import Existing Azure Resources
-      # -----------------------------
-      - name: Import Existing Azure Resources
-        working-directory: infra
-        run: |
-          RG_NAME="rg-dotnet-dev"
-          LAW_NAME="log-dev"
-          ENV_NAME="env-dev"
-          APP_NAME="dotnethelloworld-dev"
-
-          RG_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME"
-          LAW_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.OperationalInsights/workspaces/$LAW_NAME"
-          ENV_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/managedEnvironments/$ENV_NAME"
-          APP_ID="/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/$RG_NAME/providers/Microsoft.App/containerApps/$APP_NAME"
-
-          echo "🔍 Importing Azure resources if not already tracked..."
-          terraform state show module.rg.azurerm_resource_group.rg >/dev/null 2>&1 || terraform import module.rg.azurerm_resource_group.rg "$RG_ID" || true
-          terraform state show module.container_app.azurerm_log_analytics_workspace.law >/dev/null 2>&1 || terraform import module.container_app.azurerm_log_analytics_workspace.law "$LAW_ID" || true
-          terraform state show module.container_app.azurerm_container_app_environment.env >/dev/null 2>&1 || terraform import module.container_app.azurerm_container_app_environment.env "$ENV_ID" || true
-          terraform state show module.container_app.azurerm_container_app.app >/dev/null 2>&1 || terraform import module.container_app.azurerm_container_app.app "$APP_ID" || true
-          echo "✅ Import validation complete."
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-
-      # -----------------------------
-      # 📋 Terraform Plan
-      # -----------------------------
-      - name: Terraform Plan
-        working-directory: infra
-        run: |
-          terraform plan -lock=false -input=false \
-            -var="environment=${{ env.ENVIRONMENT }}" \
-            -var="location=${{ env.LOCATION }}" \
-            -var="image_name=${{ env.IMAGE_NAME }}"
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-
-      # -----------------------------
-      # 🚀 Terraform Apply
-      # -----------------------------
-      - name: Terraform Apply
-        working-directory: infra
-        run: |
-          terraform apply -lock=false -auto-approve \
-            -var="environment=${{ env.ENVIRONMENT }}" \
-            -var="location=${{ env.LOCATION }}" \
-            -var="image_name=${{ env.IMAGE_NAME }}"
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-
-      # -----------------------------
-      # 🌍 Output Application URL
-      # -----------------------------
-      - name: Show App URL
-        working-directory: infra
-        run: |
-          echo "🌍 Your App is Live at:"
-          terraform output -raw app_url || echo "⚠️ App URL not found — check infra output."
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+    - name: Display URL
+      run: echo "Deployed successfully → ${{ env.WEBAPP_URL }}"
