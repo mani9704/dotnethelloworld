@@ -3,7 +3,7 @@ variable "tenant_id"       { type = string }
 
 variable "location" {
   type    = string
-  default = "centralus"
+  default = "westus2"
 }
 
 variable "project_name" {
@@ -22,7 +22,7 @@ variable "environment" {
 variable "plan_sku" {
   description = "e.g., B1, P0v3, P1v3"
   type        = string
-  default     = "S1"
+  default     = "P1v3"
 }
 
 # .NET runtime version for App Service
